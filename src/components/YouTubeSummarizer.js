@@ -10,9 +10,10 @@ export default function YouTubeSummarizer() {
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [error, setError] = useState("");
-  const [isTranscriptExpanded, setIsTranscriptExpanded] = useState(false);
+  const [streamingProgress, setStreamingProgress] = useState(0);
   const [language, setLanguage] = useState("");
   const [languageCode, setLanguageCode] = useState("");
+  const [selectedLanguage, setSelectedLanguage] = useState("en");
 
   // Auto-trigger summary when transcript is available
   useEffect(() => {
@@ -20,6 +21,8 @@ export default function YouTubeSummarizer() {
       handleSummarize();
     }
   }, [transcript]);
+
+  const [transcriptStatus, setTranscriptStatus] = useState("");
 
   const handleGetTranscript = async (e) => {
     e.preventDefault();
@@ -33,17 +36,18 @@ export default function YouTubeSummarizer() {
     setError("");
     setTranscript("");
     setSummary("");
-    setIsTranscriptExpanded(false);
+    setStreamingProgress(0);
     setLanguage("");
     setLanguageCode("");
+    setTranscriptStatus("");
 
     try {
-      const response = await fetch("/api/transcript", {
+      const response = await fetch("/api/transcript-stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ youtubeUrl }),
+        body: JSON.stringify({ youtubeUrl, language: selectedLanguage }),
       });
 
       if (!response.ok) {
@@ -51,10 +55,44 @@ export default function YouTubeSummarizer() {
         throw new Error(errorData.error || "Failed to fetch transcript");
       }
 
-      const data = await response.json();
-      setTranscript(data.transcript);
-      setLanguage(data.language);
-      setLanguageCode(data.languageCode);
+      // Handle streaming response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split("\n").filter((line) => line.trim());
+
+          for (const line of lines) {
+            try {
+              const update = JSON.parse(line);
+
+              if (update.status === "error") {
+                throw new Error(update.error);
+              } else if (update.status === "completed") {
+                setTranscript(update.transcript);
+                setLanguage(update.language);
+                setLanguageCode(update.languageCode);
+                setTranscriptStatus("Transcription completed successfully!");
+                updateProgress("completed");
+              } else {
+                setTranscriptStatus(
+                  update.message || `Status: ${update.status}`
+                );
+                updateProgress(update.status);
+              }
+            } catch (parseError) {
+              console.warn("Failed to parse update:", line);
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -117,64 +155,141 @@ export default function YouTubeSummarizer() {
     setSummary("");
     setError("");
     setYoutubeUrl("");
-    setIsTranscriptExpanded(false);
+    setStreamingProgress(0);
     setLanguage("");
     setLanguageCode("");
+    setSelectedLanguage("en");
+    setTranscriptStatus("");
   };
 
-  const toggleTranscript = () => {
-    setIsTranscriptExpanded(!isTranscriptExpanded);
+  // Update progress based on streaming status
+  const updateProgress = (status) => {
+    switch (status) {
+      case "starting":
+        setStreamingProgress(10);
+        break;
+      case "downloading":
+        setStreamingProgress(30);
+        break;
+      case "transcribing":
+        setStreamingProgress(70);
+        break;
+      case "completed":
+        setStreamingProgress(100);
+        break;
+      default:
+        break;
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            YouTube Content Summarizer
-          </h1>
-          <p className="text-lg text-gray-600">
-            Get transcripts and AI-powered summaries of YouTube videos
-            automatically
-          </p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+      <div className="flex flex-col">
+        {/* Header */}
+        <div className="bg-white/10 backdrop-blur-md border-b border-white/20 px-6 py-6">
+          <div className="text-center">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mb-3">
+              YouTube Content Summarizer
+            </h1>
+            <p className="text-base text-gray-300">
+              Get transcripts using OpenAI Whisper and AI-powered summaries
+              automatically
+            </p>
+          </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
-          <form onSubmit={handleGetTranscript} className="mb-6">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <input
-                type="url"
-                value={youtubeUrl}
-                onChange={(e) => setYoutubeUrl(e.target.value)}
-                placeholder="Enter YouTube URL (e.g., https://www.youtube.com/watch?v=..."
-                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-black"
-                disabled={isLoadingTranscript}
-              />
-              <button
-                type="submit"
-                disabled={isLoadingTranscript}
-                className="px-8 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {isLoadingTranscript
-                  ? "Getting Transcript..."
-                  : "Get Transcript"}
-              </button>
+        {/* Controls */}
+        <div className="bg-white/10 backdrop-blur-md border-b border-white/20 px-6 py-6">
+          <form onSubmit={handleGetTranscript}>
+            <div className="flex justify-center">
+              <div className="flex flex-col sm:flex-row gap-4 max-w-4xl w-full items-center">
+                <input
+                  type="url"
+                  value={youtubeUrl}
+                  onChange={(e) => setYoutubeUrl(e.target.value)}
+                  placeholder="Enter YouTube URL (e.g., https://www.youtube.com/watch?v=..."
+                  className="flex-1 px-4 py-3 bg-white/10 backdrop-blur-sm border border-white/30 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition-all"
+                  disabled={isLoadingTranscript}
+                />
+                <div className="relative min-w-32">
+                  <select
+                    value={selectedLanguage}
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    className="w-full px-4 py-3 pr-10 bg-white/10 backdrop-blur-sm border border-white/30 rounded-xl text-white focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition-all appearance-none cursor-pointer"
+                    disabled={isLoadingTranscript}
+                  >
+                    <option value="en" className="bg-gray-800">
+                      English
+                    </option>
+                    <option value="vi" className="bg-gray-800">
+                      Vietnamese
+                    </option>
+                    <option value="es" className="bg-gray-800">
+                      Spanish
+                    </option>
+                    <option value="fr" className="bg-gray-800">
+                      French
+                    </option>
+                    <option value="de" className="bg-gray-800">
+                      German
+                    </option>
+                    <option value="it" className="bg-gray-800">
+                      Italian
+                    </option>
+                    <option value="pt" className="bg-gray-800">
+                      Portuguese
+                    </option>
+                    <option value="ru" className="bg-gray-800">
+                      Russian
+                    </option>
+                    <option value="ja" className="bg-gray-800">
+                      Japanese
+                    </option>
+                    <option value="ko" className="bg-gray-800">
+                      Korean
+                    </option>
+                    <option value="zh" className="bg-gray-800">
+                      Chinese
+                    </option>
+                    <option value="ar" className="bg-gray-800">
+                      Arabic
+                    </option>
+                    <option value="hi" className="bg-gray-800">
+                      Hindi
+                    </option>
+                    <option value="auto" className="bg-gray-800">
+                      Auto-detect
+                    </option>
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                    <svg
+                      className="w-5 h-5 text-gray-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 9l-7 7-7-7"
+                      />
+                    </svg>
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={isLoadingTranscript}
+                  className="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-xl hover:from-blue-600 hover:to-purple-700 focus:ring-4 focus:ring-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 shadow-lg"
+                >
+                  {isLoadingTranscript ? "Getting Summary..." : "Get Summary"}
+                </button>
+              </div>
             </div>
           </form>
 
-          {(transcript || summary || error) && (
-            <div className="flex justify-end mb-4">
-              <button
-                onClick={clearResults}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-              >
-                Clear Results
-              </button>
-            </div>
-          )}
-
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <div className="bg-red-500/10 backdrop-blur-sm border border-red-500/30 rounded-xl mx-6 my-4 p-4">
               <div className="flex">
                 <div className="flex-shrink-0">
                   <svg
@@ -190,132 +305,176 @@ export default function YouTubeSummarizer() {
                   </svg>
                 </div>
                 <div className="ml-3">
-                  <p className="text-sm text-red-800">{error}</p>
+                  <p className="text-base text-red-200">{error}</p>
                 </div>
               </div>
             </div>
           )}
 
+          {/* Streaming Progress Section */}
           {isLoadingTranscript && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <div className="flex items-center">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                <p className="ml-3 text-sm text-blue-800">
-                  Fetching transcript from YouTube...
-                </p>
-              </div>
-            </div>
-          )}
-
-          {transcript && (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6">
-              <button
-                onClick={toggleTranscript}
-                className="w-full flex justify-between items-center text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded-lg p-2 -m-2"
-              >
-                <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    Video Transcript
-                  </h3>
-                  {language && (
-                    <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
-                      {language}
-                    </span>
-                  )}
-                </div>
-                <svg
-                  className={`w-5 h-5 text-gray-500 transform transition-transform ${
-                    isTranscriptExpanded ? "rotate-180" : ""
-                  }`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </button>
-              {isTranscriptExpanded && (
-                <div className="mt-4 max-h-64 overflow-y-auto">
-                  <div className="whitespace-pre-wrap text-gray-700 leading-relaxed text-sm">
-                    {transcript}
+            <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 backdrop-blur-sm border border-blue-400/30 rounded-xl mx-6 my-4 p-6 shadow-xl">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-3 border-blue-400 border-t-transparent shadow-lg"></div>
+                  <div className="ml-4">
+                    <p className="text-lg text-white font-semibold">
+                      Processing with OpenAI Whisper
+                    </p>
+                    <p className="text-base text-blue-200 mt-1">
+                      {transcriptStatus || "Initializing..."}
+                    </p>
                   </div>
                 </div>
-              )}
-            </div>
-          )}
-
-          {isLoadingSummary && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-              <div className="flex items-center">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-600"></div>
-                <p className="ml-3 text-sm text-green-800">
-                  Automatically generating AI summary
-                  {language && ` in ${language}`}...
-                </p>
+                <div className="text-right">
+                  <div className="text-2xl text-blue-300 font-bold">
+                    {streamingProgress}%
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
 
-          {summary && (
-            <div className="bg-gray border border-blue-200 rounded-lg p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  AI Summary
-                </h3>
-                {language && (
-                  <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
-                    {language}
-                  </span>
-                )}
-              </div>
-              <div className="prose prose-sm max-w-none text-black">
-                <ReactMarkdown>{summary}</ReactMarkdown>
-                {isLoadingSummary && (
-                  <div className="inline-block w-2 h-4 bg-green-600 animate-pulse ml-1"></div>
-                )}
+              {/* Progress Bar */}
+              <div className="w-full bg-white/20 rounded-full h-3 shadow-inner">
+                <div
+                  className="bg-gradient-to-r from-blue-400 to-purple-500 h-3 rounded-full transition-all duration-500 ease-out shadow-lg"
+                  style={{ width: `${streamingProgress}%` }}
+                ></div>
               </div>
             </div>
           )}
         </div>
 
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">
-            How it works
-          </h2>
-          <div className="grid md:grid-cols-3 gap-6">
-            <div className="text-center">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <span className="text-xl font-bold text-blue-600">1</span>
+        {/* Main Content Area - Two Column Layout */}
+        <div className="flex flex-col lg:flex-row gap-6 p-6">
+          {/* Left Column - Video Transcript */}
+          <div className="flex-1 bg-black/20 backdrop-blur-sm border border-white/20 rounded-xl">
+            <div className="bg-white/10 backdrop-blur-md border-b border-white/20 px-6 py-4 rounded-t-xl">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-500/20 backdrop-blur-sm rounded-full flex items-center justify-center border border-blue-400/30">
+                  <svg
+                    className="w-5 h-5 text-blue-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15.536 9.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.05 6.636a5 5 0 000 7.071"
+                    />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">
+                    Video Transcript
+                  </h3>
+                  <p className="text-sm text-gray-400">
+                    OpenAI Whisper Audio Transcription
+                  </p>
+                </div>
               </div>
-              <h3 className="font-medium text-gray-900 mb-2">Get Transcript</h3>
-              <p className="text-sm text-gray-600">
-                Extract transcript and detect language from YouTube video
-              </p>
             </div>
-            <div className="text-center">
-              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <span className="text-xl font-bold text-green-600">2</span>
-              </div>
-              <h3 className="font-medium text-gray-900 mb-2">
-                Auto Processing
-              </h3>
-              <p className="text-sm text-gray-600">
-                AI analyzes content in the original language
-              </p>
+            <div className="p-6">
+              {transcript ? (
+                <div className="text-gray-200 leading-relaxed whitespace-pre-wrap text-base">
+                  {transcript}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center text-gray-400 py-12">
+                  <div className="text-center">
+                    <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-full p-8 mb-6 inline-flex">
+                      <svg
+                        className="w-16 h-16 text-blue-400"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.5}
+                          d="M15.536 9.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.05 6.636a5 5 0 000 7.071"
+                        />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    </div>
+                    <p className="text-lg text-gray-300 max-w-sm">
+                      AI-powered transcript will appear here after processing
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="text-center">
-              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <span className="text-xl font-bold text-purple-600">3</span>
+          </div>
+
+          {/* Right Column - AI Summary */}
+          <div className="flex-1 bg-black/20 backdrop-blur-sm border border-white/20 rounded-xl">
+            <div className="bg-white/10 backdrop-blur-md border-b border-white/20 px-6 py-4 rounded-t-xl">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-purple-500/20 backdrop-blur-sm rounded-full flex items-center justify-center border border-purple-400/30">
+                  <svg
+                    className="w-5 h-5 text-purple-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">AI Summary</h3>
+                  <p className="text-sm text-gray-400">
+                    Intelligent Content Analysis
+                  </p>
+                </div>
               </div>
-              <h3 className="font-medium text-gray-900 mb-2">AI Summary</h3>
-              <p className="text-sm text-gray-600">
-                Receive markdown summary in the same language
-              </p>
+            </div>
+            <div className="p-6">
+              {isLoadingSummary ? (
+                <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-6 flex items-center shadow-lg">
+                  <div className="animate-spin rounded-full h-8 w-8 border-3 border-purple-400 border-t-transparent"></div>
+                  <p className="ml-4 text-lg text-purple-200 font-medium">
+                    Generating AI summary{language && ` in ${language}`}...
+                  </p>
+                </div>
+              ) : summary ? (
+                <div className="text-gray-200 leading-relaxed text-base">
+                  <ReactMarkdown>{summary}</ReactMarkdown>
+                  {isLoadingSummary && (
+                    <div className="inline-block w-2 h-4 bg-purple-400 animate-pulse ml-1"></div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center text-gray-400 py-12">
+                  <div className="text-center">
+                    <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-full p-8 mb-6 inline-flex">
+                      <svg
+                        className="w-16 h-16 text-purple-400"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.5}
+                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                        />
+                      </svg>
+                    </div>
+                    <p className="text-lg text-gray-300 max-w-sm">
+                      AI-powered summary will appear here automatically
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

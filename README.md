@@ -1,10 +1,12 @@
 # YouTube Content Summarizer
 
-A Next.js application that uses Langchain and OpenAI to provide AI-powered summaries of YouTube videos with real-time streaming responses.
+A Next.js application that uses Langchain and OpenAI Whisper to provide AI-powered summaries of YouTube videos with real-time streaming responses.
 
 ## Features
 
-- 🎥 **YouTube Video Analysis**: Extract and analyze content from any YouTube video with captions
+- 🎥 **YouTube Video Analysis**: Download and transcribe audio from any YouTube video
+- 🎙️ **OpenAI Whisper Transcription**: High-quality audio transcription using OpenAI Whisper via Langchain
+- 🌍 **Multi-language Support**: Transcribe videos in multiple languages or auto-detect
 - 🤖 **AI-Powered Summarization**: Uses OpenAI's GPT models via Langchain for intelligent content summarization
 - ⚡ **Streaming Responses**: Real-time streaming of AI responses for immediate feedback
 - 🎨 **Modern UI**: Beautiful, responsive interface built with Tailwind CSS
@@ -12,15 +14,17 @@ A Next.js application that uses Langchain and OpenAI to provide AI-powered summa
 
 ## How It Works
 
-1. **Input YouTube URL**: Paste any YouTube video URL that has captions/subtitles available
-2. **Transcript Extraction**: The app extracts the video transcript using the YouTube Transcript API
-3. **AI Processing**: Langchain processes the transcript with OpenAI's GPT model
-4. **Streaming Summary**: Get a structured summary with real-time streaming responses
+1. **Input YouTube URL**: Paste any YouTube video URL and select transcription language
+2. **Audio Download**: The app downloads the audio track from the YouTube video using @distube/ytdl-core, with automatic fallback to yt-dlp for restricted videos
+3. **Whisper Transcription**: OpenAI Whisper transcribes the audio to text via Langchain
+4. **AI Processing**: Langchain processes the transcript with OpenAI's GPT model
+5. **Streaming Summary**: Get a structured summary with real-time streaming responses
 
 ## Prerequisites
 
 - Node.js 18+
 - OpenAI API key
+- yt-dlp (for YouTube audio download fallback)
 
 ## Installation
 
@@ -31,26 +35,34 @@ A Next.js application that uses Langchain and OpenAI to provide AI-powered summa
    cd youtube-summarizer
    ```
 
-2. **Install dependencies**:
+2. **Install yt-dlp** (macOS with Homebrew):
+
+   ```bash
+   brew install yt-dlp
+   ```
+
+   For other operating systems, see [yt-dlp installation guide](https://github.com/yt-dlp/yt-dlp#installation).
+
+3. **Install dependencies**:
 
    ```bash
    npm install
    ```
 
-3. **Set up environment variables**:
+4. **Set up environment variables**:
    Create a `.env.local` file in the root directory:
 
    ```env
    OPENAI_API_KEY=your_openai_api_key_here
    ```
 
-4. **Run the development server**:
+5. **Run the development server**:
 
    ```bash
    npm run dev
    ```
 
-5. **Open your browser**:
+6. **Open your browser**:
    Navigate to `http://localhost:3000`
 
 ## Usage
@@ -68,8 +80,9 @@ A Next.js application that uses Langchain and OpenAI to provide AI-powered summa
 
 - **Frontend**: Next.js 15, React, Tailwind CSS
 - **Backend**: Next.js API Routes
-- **AI/ML**: Langchain, OpenAI GPT-3.5-turbo
-- **Video Processing**: YouTube Transcript API
+- **AI/ML**: Langchain, OpenAI Whisper, OpenAI GPT-3.5-turbo
+- **Audio Processing**: @distube/ytdl-core with yt-dlp fallback for YouTube audio download
+- **Transcription**: OpenAI Whisper Audio via @langchain/community
 - **Streaming**: ReadableStream API for real-time responses
 
 ## Project Structure
@@ -79,19 +92,48 @@ youtube-summarizer/
 ├── src/
 │   ├── app/
 │   │   ├── api/
+│   │   │   ├── transcript/
+│   │   │   │   └── route.js          # Whisper transcription API endpoint
 │   │   │   └── summarize/
-│   │   │       └── route.js          # Streaming API endpoint
+│   │   │       └── route.js          # Streaming AI summary endpoint
 │   │   ├── globals.css               # Global styles
 │   │   ├── layout.js                 # App layout
 │   │   └── page.js                   # Home page
 │   └── components/
 │       └── YouTubeSummarizer.js      # Main component
+├── temp/                             # Temporary audio files (auto-cleaned)
 ├── .env.local                        # Environment variables
 ├── package.json                      # Dependencies
 └── README.md                         # This file
 ```
 
 ## API Endpoints
+
+### `POST /api/transcript`
+
+Transcribes YouTube video audio using OpenAI Whisper.
+
+**Request Body:**
+
+```json
+{
+  "youtubeUrl": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "language": "en" // Optional: language code or "auto" for auto-detection
+}
+```
+
+**Response:**
+
+```json
+{
+  "transcript": "Full video transcript...",
+  "language": "en",
+  "languageCode": "en",
+  "videoId": "VIDEO_ID",
+  "success": true,
+  "method": "OpenAI Whisper"
+}
+```
 
 ### `POST /api/summarize`
 
@@ -101,7 +143,9 @@ Summarizes YouTube video content with streaming response.
 
 ```json
 {
-  "youtubeUrl": "https://www.youtube.com/watch?v=VIDEO_ID"
+  "transcript": "Video transcript text...",
+  "language": "English",
+  "languageCode": "en"
 }
 ```
 
@@ -163,4 +207,4 @@ If you encounter any issues or have questions:
 
 ---
 
-**Note**: This application requires YouTube videos to have captions/subtitles available. Videos without transcripts cannot be summarized.
+**Note**: This application downloads audio from YouTube videos and transcribes them using OpenAI Whisper. It works with any YouTube video that has audio, regardless of whether captions are available. The quality of transcription depends on audio clarity and the selected language.
